@@ -28,11 +28,11 @@ SE=./target/release/speakeasy          # every command prints JSON on stdout
 $SE --root ~/sp-a init --publisher
 $SE --root ~/sp-a publish --feed sample-events --from ./export-dir --schema example/1 --attr coverage=fictional
 $SE --root ~/sp-a descriptor sample-events > sample-events.descriptor.json   # share out of band
-$SE --root ~/sp-a serve                                   # prints {"ticket": "endpoint…"}
+$SE --root ~/sp-a serve                                   # prints {"endpoint_id": …, "ticket": "endpoint…"}
 
 # Subscriber (B)
 $SE --root ~/sp-b init
-$SE --root ~/sp-b subscribe sample-events.descriptor.json --peer <A-ticket>
+$SE --root ~/sp-b subscribe sample-events.descriptor.json --peer <A-endpoint-id>   # stable in n0 mode; tickets go stale
 $SE --root ~/sp-b sync sample-events                      # verify + install atomically
 $SE --root ~/sp-b export sample-events                    # {"current_path": ".../current", "version_path": ...}
 $SE --root ~/sp-b status sample-events                    # installed version, last sync, errors
@@ -68,6 +68,8 @@ cargo clippy --all-targets -- -D warnings
 cargo test                                      # unit, CLI multi-process (loopback), crash-recovery tests
 cargo run --example iroh_spike -- local "$(mktemp -d)/spike"   # Milestone 0 transport spike
 ```
+
+A default debug build of the dependency tree needs about 3 GB. On a machine short of disk space, prefix the commands with `CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 CARGO_INCREMENTAL=0` (about 0.7 GB).
 
 The tests use temporary roots and synthetic fixtures, and run on loopback in `--network local` mode. They are **not** evidence of connectivity across networks. For the owner-run two-machine procedure, see [docs/transport-decision.md](docs/transport-decision.md#owner-run-two-machine-verification). With the CLI, run the Usage steps above on two machines in `n0` mode and record the results in that document.
 

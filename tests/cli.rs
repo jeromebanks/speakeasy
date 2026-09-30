@@ -49,26 +49,42 @@ fn fails(root: &Path, args: &[&str], code: i32) -> Value {
 struct Server {
     child: Child,
     ticket: String,
+    /// Stdout lines after the banner.
+    lines: std::sync::mpsc::Receiver<String>,
 }
 
 impl Server {
     fn start(root: &Path) -> Self {
+        Self::start_with(root, &[])
+    }
+
+    fn start_with(root: &Path, extra: &[&str]) -> Self {
         let mut child = Command::new(BIN)
             .arg("--root")
             .arg(root)
             .args(["--network", "local", "--bind", "127.0.0.1:0", "serve"])
+            .args(extra)
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
             .spawn()
             .expect("spawn serve");
+        let mut reader = BufReader::new(child.stdout.take().unwrap());
         let mut line = String::new();
-        BufReader::new(child.stdout.take().unwrap())
-            .read_line(&mut line)
-            .unwrap();
+        reader.read_line(&mut line).unwrap();
         let v: Value = serde_json::from_str(&line).expect("serve banner");
+        let (tx, lines) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            for line in reader.lines() {
+                let Ok(line) = line else { break };
+                if tx.send(line).is_err() {
+                    break;
+                }
+            }
+        });
         Self {
             child,
             ticket: v["ticket"].as_str().unwrap().to_string(),
+            lines,
         }
     }
 
@@ -302,14 +318,12 @@ fn publish_replicate_reseed_and_reject() {
     fs::write(&mpath, &original).unwrap();
 }
 
-#[test]
-fn corrupted_blob_is_not_installed() {
-    let tmp = tempfile::tempdir().unwrap();
-    let t = tmp.path();
+/// Publisher A with v1 published and subscriber B at v1 (synced from A).
+fn a_and_b_at_v1(t: &Path) -> (PathBuf, PathBuf, PathBuf) {
     let [a, b] = ["a", "b"].map(|n| t.join(n));
     ok(&a, &["init", "--publisher"]);
-    let v1 = t.join("fixture");
-    write_fixture(&v1, "corruption");
+    let v1 = t.join("fixture-v1");
+    write_fixture(&v1, "v1");
     ok(
         &a,
         &["publish", "--feed", "f", "--from", v1.to_str().unwrap()],
@@ -322,28 +336,152 @@ fn corrupted_blob_is_not_installed() {
     .unwrap();
     ok(&b, &["init"]);
     ok(&b, &["subscribe", desc.to_str().unwrap()]);
+    let server = Server::start(&a);
+    ok(&b, &["sync", "f", "--peer", &server.ticket]);
+    server.stop();
+    (a, b, v1)
+}
 
-    // Flip bytes in the large artifact's data file inside A's blob store.
-    let hash = blake3::hash(&synthetic("corruption", 100_000))
-        .to_hex()
-        .to_string();
+#[test]
+fn corrupted_or_missing_update_preserves_previous_version() {
+    let tmp = tempfile::tempdir().unwrap();
+    let t = tmp.path();
+    let (a, b, v1) = a_and_b_at_v1(t);
+    let v2 = t.join("fixture-v2");
+    write_fixture(&v2, "v2");
+    ok(
+        &a,
+        &["publish", "--feed", "f", "--from", v2.to_str().unwrap()],
+    );
+
+    // Corrupt the changed artifact's data inside A's blob store.
+    let hash = blake3::hash(&synthetic("v2", 100_000)).to_hex().to_string();
     let data_file = find_file(&a.join("blobs"), &hash).expect("blob data file");
-    let mut bytes = fs::read(&data_file).unwrap();
-    assert_eq!(bytes.len(), 100_000);
-    bytes[50_000] ^= 0xff;
-    fs::write(&data_file, &bytes).unwrap();
-
+    let good = fs::read(&data_file).unwrap();
+    assert_eq!(good.len(), 100_000);
+    let mut bad = good.clone();
+    bad[50_000] ^= 0xff;
+    fs::write(&data_file, &bad).unwrap();
     let server = Server::start(&a);
     let out = se(
         &b,
         &["sync", "f", "--peer", &server.ticket, "--timeout", "20"],
     );
-    assert!(!out.status.success(), "corrupted content was accepted");
     let err = String::from_utf8_lossy(&out.stderr);
-    eprintln!("corrupted fetch error: {err}");
+    assert!(!out.status.success(), "corrupted content was accepted");
     assert!(err.contains("fetch events/2026-10.bin"), "{err}");
-    assert_eq!(installed_seq(&b, "f"), None);
+    assert_eq!(installed_seq(&b, "f"), Some(1));
+    assert_eq!(tree(&current(&b, "f")), tree(&v1));
     server.stop();
+
+    // Missing artifact data on the only peer.
+    fs::remove_file(&data_file).unwrap();
+    let server = Server::start(&a);
+    let out = se(
+        &b,
+        &["sync", "f", "--peer", &server.ticket, "--timeout", "20"],
+    );
+    assert!(!out.status.success(), "missing artifact was accepted");
+    assert_eq!(installed_seq(&b, "f"), Some(1));
+    assert_eq!(tree(&current(&b, "f")), tree(&v1));
+    server.stop();
+
+    // Once the peer holds correct data again, the update installs.
+    fs::write(&data_file, &good).unwrap();
+    let server = Server::start(&a);
+    let s = ok(&b, &["sync", "f", "--peer", &server.ticket]);
+    assert_eq!(s["sequence"], 2);
+    assert_eq!(tree(&current(&b, "f")), tree(&v2));
+    server.stop();
+}
+
+#[test]
+fn equivocation_is_rejected() {
+    let tmp = tempfile::tempdir().unwrap();
+    let t = tmp.path();
+    let (a, b, _) = a_and_b_at_v1(t);
+    // A forked copy of the publisher root (same key) publishes a different v2.
+    let fork = t.join("a-fork");
+    assert!(
+        Command::new("cp")
+            .args(["-R", a.to_str().unwrap(), fork.to_str().unwrap()])
+            .status()
+            .unwrap()
+            .success()
+    );
+    let v2 = t.join("fixture-v2");
+    write_fixture(&v2, "v2");
+    let v2x = t.join("fixture-v2x");
+    write_fixture(&v2x, "v2 conflicting");
+    ok(
+        &a,
+        &["publish", "--feed", "f", "--from", v2.to_str().unwrap()],
+    );
+    ok(
+        &fork,
+        &["publish", "--feed", "f", "--from", v2x.to_str().unwrap()],
+    );
+
+    let server_a = Server::start(&a);
+    ok(&b, &["sync", "f", "--peer", &server_a.ticket]);
+    server_a.stop();
+    let server_fork = Server::start(&fork);
+    let err = fails(&b, &["sync", "f", "--peer", &server_fork.ticket], 3);
+    assert!(
+        err["error"].as_str().unwrap().contains("equivocation"),
+        "{err}"
+    );
+    assert_eq!(installed_seq(&b, "f"), Some(2));
+    assert_eq!(tree(&current(&b, "f")), tree(&v2));
+    server_fork.stop();
+}
+
+#[test]
+fn serve_sync_every_keeps_a_serving_subscriber_updated() {
+    let tmp = tempfile::tempdir().unwrap();
+    let t = tmp.path();
+    let (a, b, _) = a_and_b_at_v1(t);
+    let v2 = t.join("fixture-v2");
+    write_fixture(&v2, "v2");
+    ok(
+        &a,
+        &["publish", "--feed", "f", "--from", v2.to_str().unwrap()],
+    );
+    let server_a = Server::start(&a);
+    // Store A as a peer hint so the periodic sync knows where to look.
+    let desc = t.join("d.json");
+    ok(
+        &b,
+        &[
+            "subscribe",
+            desc.to_str().unwrap(),
+            "--peer",
+            &server_a.ticket,
+        ],
+    );
+    let server_b = Server::start_with(&b, &["--sync-every", "1"]);
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let mut updated = None;
+    while Instant::now() < deadline {
+        if let Ok(line) = server_b.lines.recv_timeout(Duration::from_millis(500)) {
+            let v: Value = serde_json::from_str(&line).unwrap();
+            if v["outcome"] == "updated" {
+                updated = Some(v);
+                break;
+            }
+        }
+    }
+    let updated = updated.expect("serve --sync-every reported no update");
+    assert_eq!(updated["sequence"], 2);
+    // B serves v2 to C while also syncing.
+    let c = t.join("c");
+    ok(&c, &["init"]);
+    ok(&c, &["subscribe", desc.to_str().unwrap()]);
+    let s = ok(&c, &["sync", "f", "--peer", &server_b.ticket]);
+    assert_eq!(s["sequence"], 2);
+    assert_eq!(tree(&current(&c, "f")), tree(&v2));
+    server_b.stop();
+    server_a.stop();
 }
 
 fn find_file(dir: &Path, needle: &str) -> Option<PathBuf> {

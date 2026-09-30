@@ -125,6 +125,25 @@ All exports matched the source bytes (`cmp` and BLAKE3).
 It shows only that this host can reach n0 relays and pkarr/DNS, and that
 the relay path carries data.
 
+### Same host, `speakeasy` CLI in n0 mode (internet required)
+
+The full CLI ran in the default `--network n0` mode with three roots (A, B, C)
+on one Mac. The fixtures were 3 MB and 0.5 MB random files.
+
+| Step | Result |
+| --- | --- |
+| A publish v1, A `serve`; B `sync --peer <ticket>` | updated, 3 000 008 bytes, 1.2 s wall |
+| B `sync --peer <bare endpoint id>` | up to date (id resolved via pkarr/DNS) |
+| A stopped, publish v2 (one artifact changed), A `serve` again on a **new random port**; B syncs by the **same bare id** | updated to 2, 1 artifact, 500 000 bytes |
+| A stopped (SIGTERM, exited within ~1 s); B `serve`; C syncs from B by B's id | updated 1→2, content identical, publisher = A's key |
+
+Endpoint ids stay stable across restarts because the node key is persisted.
+Tickets embed the current port and addresses and go stale. **In n0 mode, use
+bare endpoint ids as peer hints.** In local mode, tickets are required.
+
+This evidence is from one host. It does not show NAT traversal between
+networks.
+
 ### Not yet tested
 
 - Two machines on different networks (NAT traversal, direct vs relayed paths
@@ -163,8 +182,29 @@ $S serve /tmp/spike-b                              # copy the ticket
 $S fetch /tmp/spike-c '<ticket-from-B>' /tmp/spike-out-c.bin
 ```
 
+The same check with the `speakeasy` CLI (Milestone 1 path, n0 mode):
+
+```sh
+cargo build --release; SE=./target/release/speakeasy
+# A (Mac mini)
+$SE --root /tmp/sp-a init --publisher
+mkdir -p /tmp/fx && head -c 67108864 /dev/urandom > /tmp/fx/events.bin
+$SE --root /tmp/sp-a publish --feed trial --from /tmp/fx
+$SE --root /tmp/sp-a descriptor trial > /tmp/trial.json      # copy to B and C
+$SE --root /tmp/sp-a serve                                   # note endpoint_id
+# B (other network)
+$SE --root /tmp/sp-b init && $SE --root /tmp/sp-b subscribe /tmp/trial.json
+$SE --root /tmp/sp-b sync trial --peer <A-endpoint-id>
+# stop A; then on B:
+$SE --root /tmp/sp-b serve                                   # note endpoint_id
+# C (third machine/network)
+$SE --root /tmp/sp-c init && $SE --root /tmp/sp-c subscribe /tmp/trial.json
+$SE --root /tmp/sp-c sync trial --peer <B-endpoint-id>
+$SE --root /tmp/sp-c inspect trial                           # publisher must equal A's key
+```
+
 Until someone runs these commands and records the results here, the
-internet-connectivity criteria of Milestone 0 remain **unverified**.
+internet-connectivity criteria of Milestones 0 and 1 remain **unverified**.
 
 ## Milestone 1 implementation notes
 

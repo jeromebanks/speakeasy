@@ -164,12 +164,7 @@ async fn interrupted_transfer_resumes_on_next_sync() {
     let b_repo = Repo::init(&tmp.path().join("b"), false).unwrap();
     let input = tmp.path().join("input");
     fs::create_dir_all(&input).unwrap();
-    let mut big = vec![0u8; 16 * 1024 * 1024];
-    blake3::Hasher::new()
-        .update(b"interrupt")
-        .finalize_xof()
-        .fill(&mut big);
-    fs::write(input.join("big.bin"), &big).unwrap();
+    fs::write(input.join("small.txt"), b"version one").unwrap();
     {
         let (store, _lock) = open_store(&a_repo).await.unwrap();
         ops::publish(&a_repo, &store, publish_opts("f", &input), &limits)
@@ -181,8 +176,32 @@ async fn interrupted_transfer_resumes_on_next_sync() {
     let desc = ops::descriptor(&a_feed, &[]).unwrap();
     let b_feed = ops::subscribe(&b_repo, &desc, &[]).unwrap();
 
-    let a = Node::open(a_repo, &net).await.unwrap();
+    let a = Node::open(a_repo.clone(), &net).await.unwrap();
     let ticket = a.ticket().await.to_string();
+
+    // B installs v1.
+    let b = Node::open(b_repo.clone(), &net).await.unwrap();
+    ops::sync_feed(
+        &b,
+        &b_feed,
+        std::slice::from_ref(&ticket),
+        &limits,
+        Duration::from_secs(60),
+    )
+    .await
+    .unwrap();
+    b.shutdown().await.unwrap();
+
+    // A publishes v2 adding a 16 MiB artifact (in-process: A's node holds the store).
+    let mut big = vec![0u8; 16 * 1024 * 1024];
+    blake3::Hasher::new()
+        .update(b"interrupt")
+        .finalize_xof()
+        .fill(&mut big);
+    fs::write(input.join("big.bin"), &big).unwrap();
+    ops::publish(&a_repo, &a.store, publish_opts("f", &input), &limits)
+        .await
+        .unwrap();
     let hash = Hash::new(&big);
 
     // First attempt: abort the raw transfer once at least 1 MiB has arrived.
@@ -208,8 +227,15 @@ async fn interrupted_transfer_resumes_on_next_sync() {
     }
     b.shutdown().await.unwrap();
 
-    // B restarts; sync completes, transferring only the missing remainder.
+    // B restarts with v1 intact; sync completes, transferring only the missing remainder.
     let b = Node::open(b_repo, &net).await.unwrap();
+    b_feed.recover(&limits).unwrap();
+    assert_eq!(b_feed.state().unwrap().installed.unwrap().sequence, 1);
+    assert_eq!(
+        fs::read(b_feed.current_link().join("small.txt")).unwrap(),
+        b"version one"
+    );
+    assert!(!b_feed.current_link().join("big.bin").exists());
     let local = b.store.remote().local(hash).await.unwrap();
     assert!(
         !local.is_complete() && local.local_bytes() > 0,
@@ -221,6 +247,8 @@ async fn interrupted_transfer_resumes_on_next_sync() {
         .await
         .unwrap();
     assert_eq!(report.outcome, SyncOutcome::Updated);
+    assert_eq!(report.previous_sequence, Some(1));
+    assert_eq!(report.sequence, 2);
     assert_eq!(
         report.bytes_transferred + local.local_bytes(),
         big.len() as u64

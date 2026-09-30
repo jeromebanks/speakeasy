@@ -153,9 +153,9 @@ been installed.
 
 | Property | Status |
 | --- | --- |
-| Byte integrity of artifacts | implemented and tested (BLAKE3 in transit and re-hash at install) |
+| Byte integrity of artifacts | independent re-hash before install: implemented and tested. In-transit BLAKE3 verification: provided by iroh-blobs' design. Only a corrupted *serving store* was tested (the server refused to send); a malicious sender of bad bytes was **not** tested |
 | Publisher authenticity of metadata | implemented and tested (Ed25519, pinned key) |
-| Rollback / equivocation rejection vs. installed version | implemented and tested |
+| Rollback / equivocation rejection vs. installed version | implemented and tested (CLI tests; equivocation via a forked publisher root) |
 | Freshness / freeze-attack resistance | **not provided** |
 | Confidentiality of content | **not provided**: public-data prototype |
 | Access control (who may fetch) | **not provided**: any peer reaching a server can fetch by hash or feed id |
