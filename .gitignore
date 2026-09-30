@@ -1,0 +1,19 @@
+# Build output
+/target/
+
+# Runtime state and secrets (never place real publication data in this repo)
+/.speakeasy/
+/runtime/
+/data/
+/cache/
+/keys/
+/invites/
+.env
+.env.*
+*.pem
+*.key
+
+# Local machine/editor state
+.DS_Store
+*.swp
+*.swo
