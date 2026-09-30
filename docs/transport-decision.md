@@ -224,10 +224,12 @@ transport. Formats and the trust model are in
   transferred exactly 100 000 bytes in the CLI test). Within an interrupted
   artifact, `Remote::fetch` requests only the missing ranges. There is no
   byte-level delta between different versions of an artifact.
-- **Partial-transfer persistence:** in trials, aborting after ~16 KiB left
-  nothing persisted, while aborting after ≥1 MiB (tests) or ~0.5 MB (spike)
-  left resumable data. Resumption saves bandwidth but is not guaranteed for
-  tiny partial transfers. Correctness is unaffected either way.
+- **Partial-transfer persistence is timing-dependent.** The spike aborts at the
+  first progress event (16 KiB reported), yet 540 672 bytes were persisted.
+  The library test aborting at a similar point in the sync path persisted 0
+  bytes in three of three runs; aborting after ≥1 MiB persisted resumable
+  data in every run. Resumption saves bandwidth but is not guaranteed for
+  small partial transfers. Correctness is unaffected.
 - **One process per root:** the `FsStore` (redb) *blocks* when another
   process holds it. Speakeasy takes a non-blocking lock (`<root>/lock`), so a
   second store-using command fails fast with "in use". **Consequence: the
