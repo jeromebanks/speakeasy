@@ -6,7 +6,7 @@ Speakeasy is a proposed local-first, peer-to-peer content publishing system. Pub
 
 The immediate workload is distributing periodically compiled venue/event datasets to multiple independent consumers. Speakeasy treats payloads as opaque bytes and supports a local publication metadata catalog. Payload schemas, curation, semantic validation, and content lookup indexes belong to producers and consumers. Other knowledge and analytical artifacts can use the same boundary.
 
-This repository currently contains the project brief and agent instructions. Iroh with iroh-blobs is the preferred initial networking trial; no networking or security implementation has been built.
+**Status: prototype.** Milestone 0 (Iroh trial) and the smallest authenticated publish → replicate → reseed path from Milestone 1 are implemented in Rust. Local multi-process tests pass. **Connectivity between two machines on different networks has not been verified yet.** This is a **public-data prototype**: no confidentiality or access control. See [docs/transport-decision.md](docs/transport-decision.md) and [docs/manifest-format.md](docs/manifest-format.md).
 
 Start with [INIT.md](INIT.md). Agent contributors must follow [AGENTS.md](AGENTS.md); [CLAUDE.md](CLAUDE.md) imports those instructions for Claude Code.
 
@@ -15,6 +15,61 @@ Enterprise evolution should preserve stable identities, versioned formats, confi
 ## Brand
 
 Speakeasy evokes communities that share useful information through personal connections. The proposed visual direction is a small illuminated doorway and a discreet invitation card: warm amber, charcoal, simple typography. Do not use blockchain or anonymity claims in the branding. The working name was chosen by the project owner; trademark, package, and domain availability have not been established.
+
+## Usage
+
+Requires Rust ≥ 1.91 (tested with 1.96.1) on macOS/Apple Silicon. Linux is expected to work but is untested.
+
+```sh
+cargo build --release
+SE=./target/release/speakeasy          # every command prints JSON on stdout
+
+# Publisher (A). Runtime roots default to ~/.speakeasy; never put them in a git checkout.
+$SE --root ~/sp-a init --publisher
+$SE --root ~/sp-a publish --feed sample-events --from ./export-dir --schema example/1 --attr coverage=fictional
+$SE --root ~/sp-a descriptor sample-events > sample-events.descriptor.json   # share out of band
+$SE --root ~/sp-a serve                                   # prints {"ticket": "endpoint…"}
+
+# Subscriber (B)
+$SE --root ~/sp-b init
+$SE --root ~/sp-b subscribe sample-events.descriptor.json --peer <A-ticket>
+$SE --root ~/sp-b sync sample-events                      # verify + install atomically
+$SE --root ~/sp-b export sample-events                    # {"current_path": ".../current", "version_path": ...}
+$SE --root ~/sp-b status sample-events                    # installed version, last sync, errors
+$SE --root ~/sp-b serve --sync-every 300                  # reseed to others, keep syncing
+
+# C can sync from B with A offline; C still verifies A's signature.
+```
+
+Other commands: `list`, `inspect <feed> [--sequence N]`. Global options:
+- `--network n0|local`. `n0` (the default) uses n0 relays and pkarr/DNS lookup and **publishes this node's IP addresses**. `local` uses neither and needs tickets with reachable IP addresses.
+- `--bind ADDR`.
+
+Exit codes:
+
+| Code | Meaning |
+| --- | --- |
+| 0 | ok (including "up to date") |
+| 1 | error |
+| 2 | usage |
+| 3 | verification/rejection (bad signature, wrong publisher, rollback, equivocation) |
+| 4 | unavailable (no peer reachable, or no peer has the feed) |
+
+Known limits:
+- One process per root. Stop `serve` before `publish`; a subscriber that serves uses `serve --sync-every`.
+- Each version is stored twice: blob store plus export.
+- No freshness guarantee: a peer can withhold newer versions.
+
+## Verification
+
+```sh
+cargo fmt --check
+cargo clippy --all-targets -- -D warnings
+cargo test                                      # unit, CLI multi-process (loopback), crash-recovery tests
+cargo run --example iroh_spike -- local "$(mktemp -d)/spike"   # Milestone 0 transport spike
+```
+
+The tests use temporary roots and synthetic fixtures, and run on loopback in `--network local` mode. They are **not** evidence of connectivity across networks. For the owner-run two-machine procedure, see [docs/transport-decision.md](docs/transport-decision.md#owner-run-two-machine-verification). With the CLI, run the Usage steps above on two machines in `n0` mode and record the results in that document.
 
 ## First milestone
 

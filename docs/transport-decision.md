@@ -166,25 +166,45 @@ $S fetch /tmp/spike-c '<ticket-from-B>' /tmp/spike-out-c.bin
 Until someone runs these commands and records the results here, the
 internet-connectivity criteria of Milestone 0 remain **unverified**.
 
-## Milestone 1 plan
+## Milestone 1 implementation notes
 
-The Milestone 1 plan is implemented in this repository as the `speakeasy`
-crate. See [manifest-format.md](manifest-format.md) and the README.
+The `speakeasy` crate implements the smallest Milestone 1 path on this
+transport. Formats and the trust model are in
+[manifest-format.md](manifest-format.md).
 
-1. The publisher's Ed25519 key is separate from the iroh endpoint key. Both are
-   persisted under the runtime root with mode 0600.
-2. The signed manifest (feed, sequence, time, schema id, artifact paths,
-   BLAKE3 hashes and sizes) uses an explicit length-prefixed encoding with a
-   domain-separation tag, and has golden-vector tests.
-3. A small custom ALPN (`speakeasy/head/1`) returns the latest signed manifest
-   a peer holds for a feed. The client verifies it against the publisher key
-   pinned in its descriptor, never against the serving peer.
-4. Artifacts are fetched per hash with `Remote::fetch`, which skips data
-   already held locally. The unit of reuse is a whole artifact; within one
-   artifact, only interrupted ranges resume.
-5. Installation happens on disk: stage, re-hash, fsync, rename into
-   `versions/<seq>`, then atomically swap the `current` pointer. Rollback
-   protection uses the highest accepted sequence number.
-6. Serving uses the blob store, which holds persistent tags for installed
-   versions. The data sits on disk twice: once in the blob store and once in
-   the export directory.
+- **Separate keys:** the publisher key (Ed25519, signs manifests) and the
+  node key (iroh endpoint identity) are separate files under the runtime root.
+- **Head lookup:** iroh-blobs only fetches by hash, so a small custom ALPN
+  (`speakeasy/head/1`) returns the latest signed manifest a peer has
+  installed for a 32-byte feed id. The response is bounded by the manifest
+  size limit and verified against the pinned publisher key, never against the
+  serving peer.
+- **Transfer granularity:** whole artifacts by BLAKE3 hash. Artifacts
+  already complete locally are skipped (v2 with one changed 100 kB artifact
+  transferred exactly 100 000 bytes in the CLI test). Within an interrupted
+  artifact, `Remote::fetch` requests only the missing ranges. There is no
+  byte-level delta between different versions of an artifact.
+- **Partial-transfer persistence:** in trials, aborting after ~16 KiB left
+  nothing persisted, while aborting after ≥1 MiB (tests) or ~0.5 MB (spike)
+  left resumable data. Resumption saves bandwidth but is not guaranteed for
+  tiny partial transfers. Correctness is unaffected either way.
+- **One process per root:** the `FsStore` (redb) *blocks* when another
+  process holds it. Speakeasy takes a non-blocking lock (`<root>/lock`), so a
+  second store-using command fails fast with "in use". **Consequence: the
+  publisher must stop `serve` to publish**, and a serving subscriber syncs
+  from inside the same process (`serve --sync-every N`). Read-only commands
+  (`status`, `list`, `inspect`, `export`, `descriptor`) do not take the lock.
+  iroh-blobs' `rpc` feature (store access from another process) is the
+  likely next step.
+- **Corrupted store data:** after bytes were flipped in the publisher's
+  blob-store data file, the *serving* side reset the stream ("stream reset by
+  peer"), and the subscriber installed nothing. This tests the serving
+  side's validation, not a malicious peer that deliberately sends bad bytes.
+  The receiver relies on iroh-blobs' BLAKE3-verified streaming, plus
+  Speakeasy's independent re-hash before install (unit-tested at the install
+  layer).
+- **Disk usage:** each installed version exists twice, once in the blob store
+  (for serving) and once in `versions/<seq>` (for consumers). The current and
+  previous versions are retained. Older versions' directories, manifests and
+  blob tags are pruned. Blob-store GC is off, so untagged blobs are not yet
+  reclaimed.

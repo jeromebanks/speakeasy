@@ -116,4 +116,4 @@ Read AGENTS.md and this brief. Inspect the repo's actual state. Begin Milestone 
 
 Repository: [jeromebanks/speakeasy](https://github.com/jeromebanks/speakeasy). The owner created it as a public repository. Public code hosting does not determine publication visibility: real events, membership, secrets, and runtime datasets stay outside this repository.
 
-This bootstrap contains documentation and agent instructions only. Licensing is undecided; select a license before presenting the project as open source.
+The repository contains the Milestone 0 Iroh spike (`examples/iroh_spike.rs`, [docs/transport-decision.md](docs/transport-decision.md)) and a first Milestone 1 slice: the `speakeasy` crate and CLI ([docs/manifest-format.md](docs/manifest-format.md)). Two-machine network verification is still outstanding. Licensing is undecided (`publish = false`); select a license before presenting the project as open source.
