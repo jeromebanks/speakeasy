@@ -38,15 +38,19 @@ OKF is an intended knowledge representation, not Speakeasy's storage schema. Its
 
 Rust is the preferred starting language, subject to a short ecosystem feasibility check. macOS on Apple Silicon is the first operational target; Linux compatibility is desirable. Do not pretend ecosystem suitability has already been established.
 
-## Milestone 0: choose the smallest viable replication approach
+## Milestone 0: trial Iroh for the initial networking implementation
 
-Before implementation, write `docs/transport-decision.md` with a brief, source-grounded comparison of reusable options. Candidate research starting points include Iroh, Hypercore/Hyperswarm/Hyperdrive, and libp2p; these are candidates, not commitments or assertions about present capabilities. Investigate existing CMS/publishing projects as well: reusing an existing implementation is preferable when it meets the requirements.
+Owner direction (2026-09-29): strongly favor [Iroh](https://github.com/n0-computer/iroh) for the initial networking layer, with [iroh-blobs](https://github.com/n0-computer/iroh-blobs) for opaque artifact transfer. Speakeasy is itself a prototype; a dependency's pre-production status is not, by itself, a reason to postpone the experiment. Try it with synthetic data, measure its behavior, and determine whether it works for us.
 
-Use current official documentation and repositories. Compare language/API maturity, licensing, macOS support, direct peer transfer, discovery, NAT traversal/relay needs, resumable transfer, incremental updates, private replication options, and operational cost. State what can be avoided in the MVP and what would require external bootstrap or relay infrastructure. A technology can depend on shared rendezvous infrastructure even when it has no central content service; make that distinction explicit.
+Begin with a short check of current official documentation, compatible crate versions, licensing, and macOS support, then build a tiny Rust connectivity and blob-transfer spike. Pin the tested versions. Document maturity limitations and observed failures without turning the dependency review into a production-readiness gate.
 
-Timebox the investigation to choosing and proving one approach. Do not implement multiple full networking stacks. Use explicit peer addresses or an out-of-band subscription descriptor if that removes the need for global discovery. Verify feasibility across two real machines/networks before claiming internet connectivity; a loopback test proves only the local behavior.
+Iroh is the preferred trial implementation, not an irrevocable protocol commitment. Keep publication identity, version metadata, artifact manifests, and the verified local export boundary independent of the networking implementation. Do not build a universal protocol abstraction or multiple backends now. Iroh endpoint authentication and blob integrity do not replace publisher-signed publication metadata, community authorization, or encryption of stored private publications.
 
-Deliverables: a recommended approach, evidence for the decision, a tiny connectivity spike, and a short implementation plan with executable acceptance steps. Record consequential decisions in the repo. If a candidate materially conflicts with the constraints, identify the tradeoff for the owner before committing to it.
+Use explicitly exchanged peer addresses/tickets for the first trial where practical. Document discovery and NAT traversal behavior, which transfers are direct or relayed, and any external bootstrap/relay dependencies and costs. Free shared connectivity infrastructure is acceptable for the trial; it does not constitute a centralized knowledge service. Keep the constraints against mandatory paid infrastructure and owner-operated cloud services.
+
+Prove transfer from A to B and subsequent serving from B to C with A offline. Exercise interrupted transfer/resumption and verification of received bytes. Verify connectivity across two real machines/networks before claiming internet connectivity; local-process tests prove only local behavior. If the execution environment cannot access those machines, complete the local spike and provide exact commands for the owner to run, marking the external-network criteria unverified.
+
+Write `docs/transport-decision.md` alongside the spike with tested versions, setup and verification commands, observed results, remaining limitations, and a short plan for Milestone 1. Avoid a broad comparative survey before trying Iroh. Revisit Hypercore, libp2p, Willow, or existing publishing systems only if the trial exposes a concrete blocker or material mismatch; record the reason before changing direction. A successful trial should lead directly into the smallest useful Iroh-based implementation slice.
 
 ## Milestone 1: verified publication and peer replication
 
@@ -86,7 +90,7 @@ Also defer multi-publisher conflict resolution, distributed curation, graph merg
 
 ## First Claude Code session
 
-Read AGENTS.md and this brief. Inspect the repo's actual state. Begin Milestone 0, using current primary sources and small experiments. Produce the transport decision and concrete implementation plan, then proceed within the agreed constraints to the smallest useful slice. Do not create a large backlog before demonstrating transfer. Do not edit Twiddle or create external issues unless explicitly requested. Report evidence, limitations, and the next unfinished milestone at handoff.
+Read AGENTS.md and this brief. Inspect the repo's actual state. Begin Milestone 0 with the preferred Iroh/iroh-blobs trial, using current primary sources and small experiments. Record the trial evidence and concrete implementation plan, then proceed within the agreed constraints to the smallest useful Iroh-based slice if the results support it. Do not create a large backlog before demonstrating transfer. Do not edit Twiddle or create external issues unless explicitly requested. Report evidence, limitations, and the next unfinished milestone at handoff.
 
 ## Repository status
 
