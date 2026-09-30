@@ -4,11 +4,9 @@ Status: bootstrap/design only. Owner-approved working name: Speakeasy.
 
 ## Problem and purpose
 
-Twiddle has two nascent experiences: Dial for internet radio and Scene (also called Shows) for local venue calendars and music discovery. Gathering their knowledge requires heterogeneous collectors, identity resolution, and AI/human curation. Repeating that work on every user's machine is expensive and wasteful.
+Speakeasy is a standalone local-first, peer-to-peer content publishing system. A producer performs expensive collection or computation once, publishes versioned datasets, and distributes them to multiple subscribers. Consumers retain selected datasets locally and read them without an online knowledge API.
 
-Twiddle issue [#7](https://github.com/jeromebanks/twiddle/issues/7) is the integration reference for moving Scene collection into a scheduled local dataset builder. Its current contract must be inspected before integration; this document does not assert a schema or implementation state.
-
-Speakeasy is a separate project for distributing the resulting publications. A publisher does the expensive work once; subscribers retain selected datasets locally and read them without AI or an online knowledge API. Eventually this should support other content and communities too.
+The immediate MVP use case is distributing periodically compiled venue and event information from one publisher to multiple independent application installations. This is a motivating workload, not a built-in domain model: accept arbitrary file/directory exports, treat payloads as opaque, and keep collection, scheduling, enrichment, event schemas, and presentation outside Speakeasy. Use fictional venue/event fixtures to exercise this workflow without introducing application-specific dependencies.
 
 The owner's always-on Mac mini is the initial publisher/seed. More seeds can follow. Avoid required infrastructure that the owner must maintain or pay for. A single initial seed is a practical starting topology, not a claim that availability is already decentralized.
 
@@ -18,22 +16,36 @@ Some underground communities intentionally limit visibility. Do not publish real
 
 | Responsibility | Owner |
 | --- | --- |
-| Source collectors, scheduling, AI/human curation, entity resolution | Twiddle or a separate knowledge producer |
-| Event/venue schemas, OKF interpretation, search and graph indexes | Knowledge runtime / consumer |
-| Opaque artifacts, manifests, verification, local cache, publication subscriptions, replication | Speakeasy |
-| Presentation, playback, personal preferences | Twiddle applications |
+| Source collectors, scheduling, AI/human curation, entity resolution | Independent knowledge producer |
+| Payload schemas, content search and graph indexes, semantic validation | Consumer / knowledge runtime |
+| Opaque artifacts, manifests, verification, local cache, publication metadata catalog/index, subscriptions, replication | Speakeasy |
+| Presentation and personal preferences | Consuming applications |
 
-OKF is an intended knowledge representation, not Speakeasy's storage schema. Its exact format is not supplied here: do not invent it. Accept a file or directory export through a documented boundary. Consumers should see only complete validated versions at stable local locations. Scene must not import the networking implementation.
+Speakeasy does not prescribe a knowledge representation or interpret dataset contents. Accept a file or directory export through a documented boundary. Consumers should see only complete validated versions at stable local locations and must not import the networking implementation. A local catalog/index over publication metadata belongs inside Speakeasy; application indexes over payload contents remain outside it.
+
+## Publication catalog and consumer contract
+
+Maintain a local catalog of explicitly subscribed publications; no central repository or public global directory is required. Start with listing and inspection rather than a discovery platform. Separate signed dataset metadata from transient hints about peers that may hold artifacts.
+
+Metadata should support a description, content type, schema/compatibility identifier, optional producer-defined coverage and provenance, and version/freshness information. Keep domain-specific coverage opaque or extensible; do not hardcode venue, graph, or analytical schemas. Subscribers can select separate feeds or artifact groups using manifest metadata without parsing their contents. Rich filtering and metadata search can follow basic replication.
+
+Expose stable publication/version identifiers, a manifest and verified export path, machine-readable CLI output, meaningful exit codes, and status suitable for an application or agent to consume. Consumers own semantic validation, indexing, aggregate merge rules, and decisions about acceptable staleness. Publishing requires explicit user/workflow authorization; reading a dataset does not authorize redistributing it. A skill or MCP wrapper can later reuse the CLI; neither is required for the first implementation.
+
+## Enterprise evolution without enterprise MVP infrastructure
+
+Preserve boundaries for later organization identity, policy enforcement, delegated authorization, audit integration, configurable storage/retention, and deployment-specific peer/relay choices. Use versioned formats, stable identities distinct from network addresses, configurable runtime roots and bounded resource use. Keep publication identity separate from whoever stores or serves it. Document extension points only where concrete initial code needs a boundary; do not build a generic plugin framework.
+
+Do not assume all feeds are public, all peers are equally trusted, or a network address is an authorization credential. Private feed identifiers and metadata can themselves be sensitive. Later enterprise features may use optional services, but the default local deployment must not acquire mandatory control planes, hosted databases, SSO services, or cloud dependencies. No enterprise readiness claim is implied by these design boundaries.
 
 ## Established constraints
 
 - Local-first consumption, including offline access to the last verified publication.
 - Real P2P early: an HTTP download alone does not complete the first milestone.
 - No mandatory centralized knowledge service, hosted database, blockchain, token economy, or paid infrastructure.
-- No general-purpose filesystem, multiwriter collaboration engine, or Nightshift implementation in the MVP.
+- No general-purpose filesystem, multiwriter collaboration engine, or distributed task execution in the MVP.
 - One authoritative signing publisher per feed initially. Subscribers may relay the publisher's bytes without becoming authors.
 - Immutable content artifacts and authenticated versioned publication metadata. Choose exact formats after the feasibility spike.
-- Transport must not interpret concerts, artists, or OKF. Keep a small seam between local storage/verification and replication; avoid speculative framework design.
+- Transport must not interpret payload schemas. Keep a small seam between local storage/verification and replication; avoid speculative framework design.
 - Do not recreate established cryptographic or networking primitives.
 
 Rust is the preferred starting language, subject to a short ecosystem feasibility check. macOS on Apple Silicon is the first operational target; Linux compatibility is desirable. Do not pretend ecosystem suitability has already been established.
@@ -70,7 +82,15 @@ Authenticated version metadata should identify the feed, publisher, version/sequ
 
 Use bounded artifact sizes, paths, and disk usage. Reject path traversal and unsafe extraction before installation. Keep secrets out of descriptors, logs, fixtures, and commits. Document publisher key storage and backup expectations. Garbage collection must preserve installed versions and in-progress operations; advanced storage policies can wait.
 
-No application-specific query API is required. Expose a verified local snapshot/export plus status. Consumers rebuild their own disposable lookup indexes and decide how to present stale data.
+No application-specific query API is required. Expose a verified local snapshot/export, minimal publication listing/inspection, and status. Consumers rebuild their own disposable lookup indexes and decide how to present stale data.
+
+## After the first exchange: locality and distribution evidence
+
+Prefer an existing verified cache before transferring bytes. Add explicit preferred peer groups so retrieval can try configured local peers before remote peers or the original source. Apply bounded timeouts and fallback; do not infer network locality from identity or blindly equate locality with trust. Automatic topology discovery and coordinated cross-site fetching are later work.
+
+Record cache reuse, transfer bytes by serving peer, duration, and observed direct/relay paths where available. Demonstrate that a local holder can supply an artifact without fetching that artifact from a remote source. Measure savings across the relevant network boundary; do not promise lower total bandwidth or cloud bills merely because a transfer is P2P. Concurrent cold downloads may still duplicate remote traffic until coordination exists.
+
+Reuse of published computation is supported; task scheduling, distributed execution, and validation of computed results remain outside scope. Knowledge packs and analytical partitions are possible opaque payloads, not additional MVP integrations.
 
 ## Milestone 2: simple private publications
 
@@ -90,7 +110,7 @@ Also defer multi-publisher conflict resolution, distributed curation, graph merg
 
 ## First Claude Code session
 
-Read AGENTS.md and this brief. Inspect the repo's actual state. Begin Milestone 0 with the preferred Iroh/iroh-blobs trial, using current primary sources and small experiments. Record the trial evidence and concrete implementation plan, then proceed within the agreed constraints to the smallest useful Iroh-based slice if the results support it. Do not create a large backlog before demonstrating transfer. Do not edit Twiddle or create external issues unless explicitly requested. Report evidence, limitations, and the next unfinished milestone at handoff.
+Read AGENTS.md and this brief. Inspect the repo's actual state. Begin Milestone 0 with the preferred Iroh/iroh-blobs trial, using current primary sources and small experiments. Record the trial evidence and concrete implementation plan, then proceed within the agreed constraints to the smallest useful Iroh-based slice if the results support it. Do not create a large backlog before demonstrating transfer. Do not edit other applications or create external issues unless explicitly requested. Bound the first session to Milestone 0 and the smallest authenticated publication/installation/reseeding path from Milestone 1. Do not proceed into private publications, locality optimization, or expanded catalog features in that session. Include minimal metadata listing/inspection if needed to make the path usable. Report criteria satisfied with evidence, exact checks and reviewed commit, limitations, and the next unfinished milestone at handoff. Distinguish local tests from real-network evidence so a subsequent reviewer can independently reproduce verification.
 
 ## Repository status
 

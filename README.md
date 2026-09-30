@@ -4,11 +4,13 @@
 
 Speakeasy is a proposed local-first, peer-to-peer content publishing system. Publishers produce versioned artifacts; subscribers fetch and verify them, keep local copies, and can help seed them to other peers. Applications consume those copies without requiring a central service or running AI themselves.
 
-The first consumer is [Twiddle](https://github.com/jeromebanks/twiddle): portable, curated venue/event datasets for Scene, followed by radio catalogs and other knowledge artifacts. Speakeasy treats the payload as opaque bytes. Music schemas, OKF interpretation, curation, and application lookup indexes belong outside it.
+The immediate workload is distributing periodically compiled venue/event datasets to multiple independent consumers. Speakeasy treats payloads as opaque bytes and supports a local publication metadata catalog. Payload schemas, curation, semantic validation, and content lookup indexes belong to producers and consumers. Other knowledge and analytical artifacts can use the same boundary.
 
-This repository currently contains the project brief and agent instructions. No networking stack, protocol, or security implementation has been selected or built.
+This repository currently contains the project brief and agent instructions. Iroh with iroh-blobs is the preferred initial networking trial; no networking or security implementation has been built.
 
 Start with [INIT.md](INIT.md). Agent contributors must follow [AGENTS.md](AGENTS.md); [CLAUDE.md](CLAUDE.md) imports those instructions for Claude Code.
+
+Enterprise evolution should preserve stable identities, versioned formats, configurable deployment settings, and boundaries for later policy and audit integration. The MVP adds no enterprise control plane or mandatory cloud service.
 
 ## Brand
 

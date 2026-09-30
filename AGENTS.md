@@ -6,17 +6,25 @@ Read README.md and INIT.md before proposing architecture or writing code. Inspec
 
 ## Keep the scope small
 
-- Build the standalone P2P publishing layer. Keep music knowledge, collectors, AI curation, OKF parsing, and search indexes outside it.
+- Build the standalone P2P publishing layer. Keep payload interpretation, collectors, AI curation, and content search/graph indexes outside it. Publication metadata catalogs and their local indexes belong inside Speakeasy.
 - Demonstrate actual peer replication early. Prefer established libraries and a small CLI to a platform/control plane.
 - Follow the milestones in INIT.md. Finish a useful vertical slice before expanding infrastructure or the roadmap.
 - A Mac mini is the initial seed. No required owner-operated cloud services, paid infrastructure, blockchain, or external database servers.
-- Use current official sources when selecting dependencies; document networking and licensing tradeoffs. No ecosystem choice is final yet.
-- Avoid invented API capabilities, security guarantees, protocol formats, or OKF semantics. Say what is unknown and test it.
+- Use current official sources when selecting dependencies; document networking and licensing tradeoffs. Iroh/iroh-blobs is the preferred initial trial; pin tested versions. The publication contract remains independent.
+- Avoid invented API capabilities, security guarantees, protocol formats, or payload semantics. Say what is unknown and test it.
+
+## Product boundaries
+
+- The first workload is periodic opaque venue/event dataset distribution to multiple consumers. Keep client application names, schemas, and implementation details out of this repository.
+- Provide a minimal local publication catalog and machine-readable CLI; keep metadata indexing distinct from payload indexing.
+- Preserve versioned formats, configurable runtime/storage/peer settings, resource bounds, and publisher/serving-peer identity separation for later enterprise policy and audit integration. Do not build enterprise infrastructure in the MVP.
+- Follow the first-session scope in INIT.md. Do not expand into private communities, distributed computation, multiple backends, or automatic network topology discovery.
+- Subsequent review must map acceptance criteria to evidence and independently reproduce checks at the handoff commit.
 
 ## Work discipline
 
 - Keep changes focused and reviewable. Preserve unrelated work and inspect diffs before committing.
-- Use issue-linked branches when an issue exists. The repository does not yet have an installed SDLC skill; do not assume `work-issue`, Nightshift, review agents, or CI are available.
+- Use issue-linked branches when an issue exists. The repository does not yet have an installed SDLC skill; do not assume `work-issue`, review agents, or CI are available.
 - Implement the current requested slice with meaningful verification. Record architectural decisions with rationale and consequences, not conversation transcripts.
 - Do not create issues, publish releases, change other repos, deploy services, or alter repository access unless requested. Ordinary local implementation and verification may proceed within the agreed scope.
 - Keep CLAUDE.md as an import of this file; do not maintain divergent agent policies.
