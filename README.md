@@ -8,7 +8,7 @@ The immediate workload is distributing periodically compiled venue/event dataset
 
 **Status: prototype.** Milestone 0 (Iroh trial) and the smallest authenticated publish → replicate → reseed path from Milestone 1 are implemented in Rust. Local multi-process tests pass. **Connectivity between two machines on different networks has not been verified yet.** This is a **public-data prototype**: no confidentiality or access control. See [docs/transport-decision.md](docs/transport-decision.md), [docs/manifest-format.md](docs/manifest-format.md) and [docs/known-issues.md](docs/known-issues.md).
 
-Start with [INIT.md](INIT.md). Agent contributors must follow [AGENTS.md](AGENTS.md); [CLAUDE.md](CLAUDE.md) imports those instructions for Claude Code.
+Start with [INIT.md](INIT.md); the current status and next steps are in [docs/handoff.md](docs/handoff.md). Agent contributors must follow [AGENTS.md](AGENTS.md); [CLAUDE.md](CLAUDE.md) imports those instructions for Claude Code.
 
 Enterprise evolution should preserve stable identities, versioned formats, configurable deployment settings, and boundaries for later policy and audit integration. The MVP adds no enterprise control plane or mandatory cloud service.
 
