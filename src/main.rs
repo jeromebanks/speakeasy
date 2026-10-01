@@ -133,7 +133,7 @@ async fn main() -> ExitCode {
             match kind {
                 Some(FailureKind::Verification) => ExitCode::from(3),
                 Some(FailureKind::Unavailable) => ExitCode::from(4),
-                None => ExitCode::from(1),
+                Some(FailureKind::Local) | None => ExitCode::from(1),
             }
         }
     }

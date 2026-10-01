@@ -450,6 +450,7 @@ pub async fn stage(store: &Store, feed: &FeedDir, signed: &SignedManifest) -> Re
 /// Step 1 of commit: persist the manifest and move staging into versions/<seq>.
 pub fn place_version(feed: &FeedDir, signed: &SignedManifest, staging: &Path) -> Result<PathBuf> {
     let seq = signed.manifest.sequence;
+    ensure_newer_than_committed(feed, seq)?;
     write_bytes_atomic(&feed.manifest_path(seq), &signed.bytes)?;
     let dest = feed.version_dir(seq);
     if dest.exists() {
@@ -481,8 +482,21 @@ pub fn record_installed(feed: &FeedDir, signed: &SignedManifest) -> Result<()> {
     feed.write_state(&state)
 }
 
+/// Never replace or go below the committed version: its directory is live for
+/// readers, its manifest is what peers are served, and its tags protect its blobs.
+fn ensure_newer_than_committed(feed: &FeedDir, seq: u64) -> Result<()> {
+    if let Some(current) = feed.current_sequence()? {
+        ensure!(
+            seq > current,
+            "refusing to install sequence {seq}: committed version is {current}"
+        );
+    }
+    Ok(())
+}
+
 /// Full install: stage, place, swap, record, then prune old versions.
 pub async fn install(store: &Store, feed: &FeedDir, signed: &SignedManifest) -> Result<PathBuf> {
+    ensure_newer_than_committed(feed, signed.manifest.sequence)?;
     tag_artifacts(store, feed.id, signed).await?;
     let staging = stage(store, feed, signed).await?;
     let dest = place_version(feed, signed, &staging)?;

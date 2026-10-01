@@ -2,7 +2,9 @@
 //! `speakeasy/head/1` protocol that returns the latest signed manifest a peer
 //! holds for a feed. Transport identity (node key) is not publisher identity.
 
-use std::{net::SocketAddr, str::FromStr, time::Duration};
+use std::{net::SocketAddr, str::FromStr, sync::Arc, time::Duration};
+
+use tokio::sync::Semaphore;
 
 use anyhow::{Context, Result, anyhow, bail, ensure};
 use iroh::{
@@ -16,6 +18,12 @@ use iroh_tickets::endpoint::EndpointTicket;
 use crate::{manifest::FeedId, repo::Repo};
 
 pub const HEAD_ALPN: &[u8] = b"speakeasy/head/1";
+/// Deadline for a head exchange: stream accept, request read, response write.
+pub const HEAD_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
+/// Time to let the client read the response and close before we drop it.
+const HEAD_LINGER: Duration = Duration::from_secs(2);
+/// Concurrent head exchanges served; excess connections are closed at once.
+pub const MAX_CONCURRENT_HEAD: usize = 64;
 const HEAD_FOUND: u8 = 1;
 const HEAD_NOT_FOUND: u8 = 0;
 
@@ -84,7 +92,13 @@ impl Node {
         let endpoint = builder.bind().await?;
         let router = Router::builder(endpoint)
             .accept(iroh_blobs::ALPN, BlobsProtocol::new(&store, None))
-            .accept(HEAD_ALPN, HeadProtocol { repo: repo.clone() })
+            .accept(
+                HEAD_ALPN,
+                HeadProtocol {
+                    repo: repo.clone(),
+                    permits: Arc::new(Semaphore::new(MAX_CONCURRENT_HEAD)),
+                },
+            )
             .spawn();
         Ok(Self {
             repo,
@@ -130,6 +144,7 @@ pub fn parse_peer(s: &str) -> Result<EndpointAddr> {
 #[derive(Debug, Clone)]
 struct HeadProtocol {
     repo: Repo,
+    permits: Arc<Semaphore>,
 }
 
 impl HeadProtocol {
@@ -137,10 +152,8 @@ impl HeadProtocol {
         let feed = self.repo.feed(FeedId(feed));
         feed.installed_manifest_bytes().ok().flatten()
     }
-}
 
-impl ProtocolHandler for HeadProtocol {
-    async fn accept(&self, connection: Connection) -> Result<(), AcceptError> {
+    async fn respond(&self, connection: &Connection) -> Result<(), AcceptError> {
         let (mut send, mut recv) = connection.accept_bi().await?;
         let request = recv.read_to_end(32).await.map_err(AcceptError::from_err)?;
         let Ok(feed) = <[u8; 32]>::try_from(request) else {
@@ -163,7 +176,26 @@ impl ProtocolHandler for HeadProtocol {
             }
         }
         send.finish()?;
-        let _ = tokio::time::timeout(Duration::from_secs(10), connection.closed()).await;
+        Ok(())
+    }
+}
+
+impl ProtocolHandler for HeadProtocol {
+    async fn accept(&self, connection: Connection) -> Result<(), AcceptError> {
+        // Bound concurrency and lifetime: a peer that connects and never
+        // sends (or never reads) holds a permit for at most the deadline.
+        let Ok(_permit) = self.permits.clone().try_acquire_owned() else {
+            connection.close(2u32.into(), b"busy");
+            return Ok(());
+        };
+        match tokio::time::timeout(HEAD_REQUEST_TIMEOUT, self.respond(&connection)).await {
+            Ok(res) => res?,
+            Err(_) => {
+                connection.close(3u32.into(), b"timeout");
+                return Ok(());
+            }
+        }
+        let _ = tokio::time::timeout(HEAD_LINGER, connection.closed()).await;
         Ok(())
     }
 }

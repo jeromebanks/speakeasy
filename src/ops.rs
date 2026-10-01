@@ -1,18 +1,14 @@
 //! Command implementations shared by the CLI and tests.
 
-use std::{
-    collections::HashSet,
-    fs,
-    path::{Path, PathBuf},
-    time::Duration,
-};
+use std::{collections::HashSet, fs, path::PathBuf, time::Duration};
 
-use anyhow::{Context, Result, bail, ensure};
+use anyhow::{Context, Result, ensure};
 use ed25519_dalek::VerifyingKey;
 use iroh_blobs::{Hash, store::fs::FsStore};
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    input::{InputDir, file_stream},
     manifest::{Artifact, FeedId, Limits, Manifest, SignedManifest, validate_feed_name},
     net::{Node, fetch_head, parse_peer},
     repo::{self, FeedDir, Installed, Repo, Role, Subscription, now_unix},
@@ -28,6 +24,9 @@ pub enum FailureKind {
     Verification,
     /// No peer could be reached or none had the feed.
     Unavailable,
+    /// A local install/storage step failed. Sync stops instead of trying
+    /// other peers, because local state may be mid-commit.
+    Local,
 }
 
 #[derive(Debug)]
@@ -88,50 +87,6 @@ pub struct PublishReport {
     pub version_path: PathBuf,
 }
 
-/// Collect regular files under `dir` as (relative `/` path, absolute path).
-/// Symlinks and special files are rejected rather than followed.
-fn collect_files(dir: &Path) -> Result<Vec<(String, PathBuf)>> {
-    fn walk(base: &Path, rel: &str, out: &mut Vec<(String, PathBuf)>) -> Result<()> {
-        let dir = if rel.is_empty() {
-            base.to_path_buf()
-        } else {
-            base.join(rel)
-        };
-        for entry in fs::read_dir(&dir).with_context(|| format!("read {}", dir.display()))? {
-            let entry = entry?;
-            let name = entry.file_name();
-            let name = name
-                .to_str()
-                .with_context(|| format!("non-UTF-8 file name in {}", dir.display()))?;
-            let child = if rel.is_empty() {
-                name.to_string()
-            } else {
-                format!("{rel}/{name}")
-            };
-            let ft = fs::symlink_metadata(entry.path())?.file_type();
-            if ft.is_symlink() {
-                bail!("publish input contains a symlink: {child}");
-            } else if ft.is_dir() {
-                walk(base, &child, out)?;
-            } else if ft.is_file() {
-                out.push((child, entry.path()));
-            } else {
-                bail!("publish input contains a special file: {child}");
-            }
-        }
-        Ok(())
-    }
-    ensure!(
-        fs::symlink_metadata(dir)?.is_dir(),
-        "{} is not a directory",
-        dir.display()
-    );
-    let mut out = Vec::new();
-    walk(dir, "", &mut out)?;
-    out.sort_by(|a, b| a.0.cmp(&b.0));
-    Ok(out)
-}
-
 pub async fn publish(
     repo: &Repo,
     store: &FsStore,
@@ -143,8 +98,17 @@ pub async fn publish(
         .context("no publisher key in this root; run `speakeasy init --publisher`")?;
     let publisher = key.verifying_key().to_bytes();
     validate_feed_name(&opts.feed)?;
-    let files = collect_files(&opts.from)?;
-    crate::paths::validate_path_set(files.iter().map(|(p, _)| p.as_str()))?;
+    // Refuse input that overlaps the runtime root (keys, store, feeds).
+    let from_real = fs::canonicalize(&opts.from)
+        .with_context(|| format!("publish input {}", opts.from.display()))?;
+    let root_real = fs::canonicalize(repo.root())?;
+    ensure!(
+        !from_real.starts_with(&root_real) && !root_real.starts_with(&from_real),
+        "publish input must not overlap the speakeasy root"
+    );
+    let input = InputDir::open(&opts.from)?;
+    let files = input.list()?;
+    crate::paths::validate_path_set(files.iter().map(String::as_str))?;
     ensure!(
         files.len() <= limits.max_artifacts,
         "too many files ({})",
@@ -164,15 +128,22 @@ pub async fn publish(
     // Temp tags keep imported blobs alive until install sets persistent tags.
     let mut temp_tags = Vec::new();
     let mut artifacts = Vec::new();
-    for (path, abs) in files {
-        let size = fs::metadata(&abs)?.len();
+    let mut total: u64 = 0;
+    for path in files {
+        let (file, size) = input.open_file(&path)?;
         ensure!(
             size <= limits.max_artifact_size,
             "{path} exceeds artifact size limit"
         );
+        total = total.saturating_add(size);
+        ensure!(
+            total <= limits.max_total_size,
+            "input exceeds total size limit"
+        );
         let tag = store
             .blobs()
-            .add_path(&abs)
+            .add_stream(file_stream(file, size))
+            .await
             .temp_tag()
             .await
             .with_context(|| format!("import {path}"))?;
@@ -344,8 +315,25 @@ pub async fn sync_feed(
                 return Ok(report);
             }
             Err(e) => {
-                if failure_kind(&e) == Some(FailureKind::Verification) {
-                    kind = FailureKind::Verification;
+                match failure_kind(&e) {
+                    Some(FailureKind::Verification) => kind = FailureKind::Verification,
+                    Some(FailureKind::Local) => {
+                        // Do not fall through to other peers: their heads would
+                        // be compared against possibly stale state. Reconcile
+                        // with the committed pointer and stop.
+                        let message = format!("{}: {e:#}", short_peer(peer));
+                        let recovered = feed.recover(limits);
+                        let mut state = feed.state()?;
+                        state.last_error = Some(message.clone());
+                        feed.write_state(&state)?;
+                        recovered?;
+                        return Err(Failure {
+                            kind: FailureKind::Local,
+                            message,
+                        }
+                        .into());
+                    }
+                    _ => {}
                 }
                 errors.push(format!("{}: {e:#}", short_peer(peer)));
             }
@@ -453,7 +441,12 @@ async fn sync_from_peer(
     conn.close(0u32.into(), b"done");
     let version_path = repo::install(&node.store, feed, &signed)
         .await
-        .context("install failed")?;
+        .map_err(|e| {
+            anyhow::Error::from(Failure {
+                kind: FailureKind::Local,
+                message: format!("install failed: {e:#}"),
+            })
+        })?;
     Ok(SyncReport {
         feed_id: feed.id.to_hex(),
         feed: sub.feed.clone(),

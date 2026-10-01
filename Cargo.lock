@@ -3322,6 +3322,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "blake3",
+ "bytes",
  "clap",
  "ed25519-dalek",
  "getrandom 0.4.3",
@@ -3330,6 +3331,7 @@ dependencies = [
  "iroh-blobs",
  "iroh-tickets",
  "n0-future",
+ "rustix",
  "serde",
  "serde_json",
  "tempfile",

@@ -102,6 +102,13 @@ async fn crash_at_each_install_step_recovers_to_a_complete_version() {
     repo::place_version(&feed, &signed, &staging).unwrap();
     repo::swap_current(&feed, 2).unwrap();
     assert_eq!(feed.state().unwrap().installed.unwrap().sequence, 1);
+    // While state.json still says 1, a conflicting signed v2 (equivocation)
+    // must not replace the committed, live versions/2.
+    let (conflict, _t2) =
+        signed_version(&repo, &store, "f", 2, &[("data.txt", b"conflicting two")]).await;
+    let err = repo::install(&store, &feed, &conflict).await.unwrap_err();
+    assert!(err.to_string().contains("committed version"), "{err}");
+    assert_eq!(read(&feed, "data.txt"), b"version two");
     feed.recover(&limits).unwrap();
     let installed = feed.state().unwrap().installed.unwrap();
     assert_eq!(installed.sequence, 2);
@@ -257,6 +264,36 @@ async fn interrupted_transfer_resumes_on_next_sync() {
         fs::read(b_feed.current_link().join("big.bin")).unwrap(),
         big
     );
+    b.shutdown().await.unwrap();
+    a.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn idle_head_connections_are_closed_by_the_server() {
+    let tmp = tempfile::tempdir().unwrap();
+    let net = NetConfig {
+        mode: NetworkMode::Local,
+        bind: Some("127.0.0.1:0".parse().unwrap()),
+    };
+    let a = Node::open(Repo::init(&tmp.path().join("a"), false).unwrap(), &net)
+        .await
+        .unwrap();
+    let b = Node::open(Repo::init(&tmp.path().join("b"), false).unwrap(), &net)
+        .await
+        .unwrap();
+    let peer = speakeasy::net::parse_peer(&a.ticket().await.to_string()).unwrap();
+    // Connect on the head ALPN and never send a request.
+    let conn = b
+        .endpoint()
+        .connect(peer, speakeasy::net::HEAD_ALPN)
+        .await
+        .unwrap();
+    let closed = tokio::time::timeout(
+        speakeasy::net::HEAD_REQUEST_TIMEOUT + Duration::from_secs(5),
+        conn.closed(),
+    )
+    .await;
+    assert!(closed.is_ok(), "server kept an idle head connection open");
     b.shutdown().await.unwrap();
     a.shutdown().await.unwrap();
 }

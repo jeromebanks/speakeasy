@@ -6,7 +6,7 @@ Speakeasy is a proposed local-first, peer-to-peer content publishing system. Pub
 
 The immediate workload is distributing periodically compiled venue/event datasets to multiple independent consumers. Speakeasy treats payloads as opaque bytes and supports a local publication metadata catalog. Payload schemas, curation, semantic validation, and content lookup indexes belong to producers and consumers. Other knowledge and analytical artifacts can use the same boundary.
 
-**Status: prototype.** Milestone 0 (Iroh trial) and the smallest authenticated publish → replicate → reseed path from Milestone 1 are implemented in Rust. Local multi-process tests pass. **Connectivity between two machines on different networks has not been verified yet.** This is a **public-data prototype**: no confidentiality or access control. See [docs/transport-decision.md](docs/transport-decision.md) and [docs/manifest-format.md](docs/manifest-format.md).
+**Status: prototype.** Milestone 0 (Iroh trial) and the smallest authenticated publish → replicate → reseed path from Milestone 1 are implemented in Rust. Local multi-process tests pass. **Connectivity between two machines on different networks has not been verified yet.** This is a **public-data prototype**: no confidentiality or access control. See [docs/transport-decision.md](docs/transport-decision.md), [docs/manifest-format.md](docs/manifest-format.md) and [docs/known-issues.md](docs/known-issues.md).
 
 Start with [INIT.md](INIT.md). Agent contributors must follow [AGENTS.md](AGENTS.md); [CLAUDE.md](CLAUDE.md) imports those instructions for Claude Code.
 

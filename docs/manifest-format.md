@@ -84,7 +84,11 @@ does not interpret them, the schema id, or the content type.
 
   Limits are checked on the signed manifest **before** any artifact download.
 - **Publish input:** regular files only. Symlinks and special files are
-  rejected, not followed. Non-UTF-8 names are rejected.
+  rejected, not followed. Non-UTF-8 names are rejected. Every path component
+  is opened relative to its parent with `O_NOFOLLOW`, and the file is imported
+  from that verified handle (`src/input.rs`), so swapping a file for a symlink
+  between listing and import fails. Input that overlaps the runtime root is
+  refused.
 
 ## Acceptance rules (subscriber)
 
